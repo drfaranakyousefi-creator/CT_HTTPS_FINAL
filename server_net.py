@@ -4,9 +4,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 
-# ---------------------------------------------------------------
-# Squash activation — قلب Capsule Network
-# ---------------------------------------------------------------
 def squash(x, dim=-1):
     norm_sq = (x ** 2).sum(dim=dim, keepdim=True)
     norm = norm_sq.sqrt()
@@ -14,9 +11,6 @@ def squash(x, dim=-1):
     return scale * x / (norm + 1e-8)
 
 
-# ---------------------------------------------------------------
-# Primary Capsule Layer
-# ---------------------------------------------------------------
 class PrimaryCapsLayer(nn.Module):
     def __init__(self, in_features, num_capsules, capsule_dim):
         super().__init__()
@@ -30,9 +24,6 @@ class PrimaryCapsLayer(nn.Module):
         return squash(out)
 
 
-# ---------------------------------------------------------------
-# Dynamic Routing
-# ---------------------------------------------------------------
 class RoutingLayer(nn.Module):
     def __init__(self, num_input_caps, input_dim, num_output_caps, output_dim, num_routing=3):
         super().__init__()
@@ -58,13 +49,11 @@ class RoutingLayer(nn.Module):
         return v
 
 
-# ---------------------------------------------------------------
-# Prediction Network با Capsule
-# ---------------------------------------------------------------
 class prediction_net(nn.Module):
     def __init__(
         self,
-        d_model=64,
+        # FIX: d_model_server = d_model_client * n_features (بُعد واقعی CLS)
+        d_model_server=256,
         lr=0.01,
         device=None,
         num_primary_caps=8,
@@ -79,17 +68,17 @@ class prediction_net(nn.Module):
         self.device = device or torch.device(
             'cuda' if torch.cuda.is_available() else 'cpu'
         )
-        capsule_in = fc_hidden2
 
+        # FIX: اولین لایه از d_model_server شروع میکنه نه d_model_client
         self.fc_in = nn.Sequential(
-            nn.Linear(d_model, fc_hidden1),
+            nn.Linear(d_model_server, fc_hidden1),
             nn.LeakyReLU(),
             nn.Linear(fc_hidden1, fc_hidden2),
             nn.LeakyReLU(),
         ).to(self.device)
 
         self.primary_caps = PrimaryCapsLayer(
-            in_features=capsule_in,
+            in_features=fc_hidden2,
             num_capsules=num_primary_caps,
             capsule_dim=primary_dim
         ).to(self.device)
@@ -109,23 +98,15 @@ class prediction_net(nn.Module):
         self.to(self.device)
 
     def forward_direct(self, cls_tensor):
-        """
-        ورودی مستقیم tensor با graph سالم — بدون JSON، بدون torch.tensor جدید.
-        گراف محاسباتی از client تا اینجا کاملاً حفظ میشه.
-        خروجی: (batch,)
-        """
+        """ورودی مستقیم tensor — گراف محاسباتی از client حفظ میشه."""
         h = self.fc_in(cls_tensor)
         h = self.primary_caps(h)
         h = self.routing(h)
         h = h.view(h.size(0), -1)
-        output = self.fc_out(h)
-        return output.squeeze(1)  # (batch,)
+        return self.fc_out(h).squeeze(1)  # (batch,)
 
     def forward(self, cls_vector, label=None, status='test'):
-        """
-        متد قدیمی — فقط برای سازگاری با transmitter_simulation نگه داشته شده.
-        در مسیر جدید (CT_HTTPS) از این استفاده نمیشه.
-        """
+        """متد قدیمی — فقط برای سازگاری با transmitter_simulation."""
         x = torch.tensor(cls_vector, dtype=torch.float, device=self.device)
         x.requires_grad_(True)
 
