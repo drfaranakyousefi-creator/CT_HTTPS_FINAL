@@ -108,6 +108,7 @@ class CT_HTTPS(nn.Module):
         )
 
         self._lr_spec = lr
+        initial_lr = lr_at_epoch(1, lr)   # FIX: scalar برای Adam
 
         if dataset_name == "metavision":
             n_features = 4
@@ -122,12 +123,12 @@ class CT_HTTPS(nn.Module):
             dim_feedforward=dim_feedforward,
             num_cells=num_cells,
             dropout=dropout,
-            lr=lr
+            lr=initial_lr           # FIX: scalar نه dict
         ).to(self.device)
 
         self.prediction = prediction_net(
             d_model=d_model,
-            lr=lr,
+            lr=initial_lr,          # FIX: scalar نه dict
             device=self.device
         ).to(self.device)
 
@@ -135,7 +136,7 @@ class CT_HTTPS(nn.Module):
             list(self.network.parameters())
             +
             list(self.prediction.parameters()),
-            lr=lr
+            lr=initial_lr           # FIX: scalar نه dict
         )
 
         df = pd.read_csv(
