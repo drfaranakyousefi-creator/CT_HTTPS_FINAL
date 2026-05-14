@@ -89,6 +89,8 @@ class CT_HTTPS(nn.Module):
         )
 
         target = kw.pop("target", "spO2")
+        test_size = kw.pop("test_size", 0.2)
+        normalize_data = kw.pop("normalize_data", True)
         lr = kw.pop("lr", 0.01)
 
         d_model = kw.pop("d_model", 8)
@@ -140,15 +142,18 @@ class CT_HTTPS(nn.Module):
         )
 
         df = pd.read_csv(
-            chartevents_path
+            chartevents_path,
+            low_memory=False   # FIX: جلوگیری از DtypeWarning
         )
 
         self.data = data_preparing(
             df,
             dataset_name,
             w,
+            test_size=test_size,    # FIX: پارامتر اجباری که جا افتاده بود
             target=target,
-            batch_size=batch_size
+            batch_size=batch_size,
+            normalize=normalize_data
         )
 
         self.loss_fn = nn.MSELoss()
