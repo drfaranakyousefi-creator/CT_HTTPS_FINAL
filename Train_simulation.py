@@ -162,15 +162,26 @@ class CT_HTTPS(nn.Module):
         return tr, te
 
     def _eval_loader(self, loader):
-        total, n = 0, 0
+        preds, labels = [], []
         for x, y, pad_mask in loader:
             x, y, pad_mask = x.to(self.device), y.to(self.device), pad_mask.to(self.device)
-            cls_out = self.network(x, pad_mask)
-            pred    = self.prediction.forward_direct(cls_out)
-            total  += x.shape[0] * self.loss_fn(pred, y)
-            n      += x.shape[0]
-        return total / n
-
+            with torch.no_grad():
+                cls_out = self.network(x, pad_mask)
+                pred    = self.prediction.forward_direct(cls_out)
+            preds.append(pred.cpu())
+            labels.append(y.cpu())
+        
+        preds  = torch.cat(preds)
+        labels = torch.cat(labels)
+        
+        mse  = ((preds - labels)**2).mean()
+        mae  = (preds - labels).abs().mean()
+        rmse = mse.sqrt()
+        ss_res = ((labels - preds)**2).sum()
+        ss_tot = ((labels - labels.mean())**2).sum()
+        r2   = 1 - ss_res / ss_tot
+        
+        return {"MSE": mse.item(), "MAE": mae.item(), "RMSE": rmse.item(), "R²": r2.item()}
     def get_knowledge(self, CT_object):
         source_aes = CT_object.network.feature_aes
         n_shared   = min(self.network.n_features, len(source_aes))
