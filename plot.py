@@ -1,4 +1,5 @@
 import math
+import os
 import matplotlib.pyplot as plt
 
 # ── Visual constants ──────────────────────────────────────────────
@@ -13,55 +14,78 @@ _METRIC_META = {
         "y_label": "MSE",
         "better":  "Lower is better",
         "unit":    "",
+        "filename": "metric_MSE.png",
     },
     "RMSE": {
         "label":   "RMSE — Root Mean Squared Error",
         "y_label": "RMSE",
         "better":  "Lower is better",
         "unit":    "",
+        "filename": "metric_RMSE.png",
     },
     "MAE":  {
         "label":   "MAE — Mean Absolute Error",
         "y_label": "MAE",
         "better":  "Lower is better",
         "unit":    "",
+        "filename": "metric_MAE.png",
     },
     "R2":   {
         "label":   "R² — Coefficient of Determination",
         "y_label": "R²",
         "better":  "Closer to 1 is better",
         "unit":    "",
+        "filename": "metric_R2.png",
     },
     "MAPE": {
         "label":   "MAPE — Mean Absolute Percentage Error",
         "y_label": "MAPE (%)",
         "better":  "Lower is better",
         "unit":    "%",
+        "filename": "metric_MAPE.png",
     },
 }
 
 
 # ── Public entry point ────────────────────────────────────────────
-def plot_history(history: dict):
+def plot_history(history: dict, save_dir: str = "."):
     """
-    Plot training history.
+    Plot and save training history as separate image files.
 
-    - Legacy format (only loss_train / loss_test): single MSE figure.
-    - Full format: one separate figure per metric + summary table.
+    Parameters
+    ----------
+    history  : dict returned by CT_HTTPS.fit()
+    save_dir : folder where .png files will be saved (default: current dir)
+
+    Saved files
+    -----------
+    metric_MSE.png, metric_RMSE.png, metric_MAE.png,
+    metric_R2.png,  metric_MAPE.png, summary_table.png
     """
+    os.makedirs(save_dir, exist_ok=True)
+
     if "train_RMSE" not in history:
-        _plot_simple(history)
+        _plot_simple(history, save_dir)
         return
 
     epochs = list(range(1, len(history["loss_train"]) + 1))
-    for key in _METRIC_META:
-        _plot_single_metric(history, key, epochs)
+    saved  = []
 
-    _plot_summary_table(history)
+    for key in _METRIC_META:
+        path = _plot_single_metric(history, key, epochs, save_dir)
+        saved.append(path)
+
+    path = _plot_summary_table(history, save_dir)
+    saved.append(path)
+
+    print("\n── Saved figures ─────────────────────────────")
+    for p in saved:
+        print(f"   {p}")
+    print("──────────────────────────────────────────────\n")
 
 
 # ── Legacy ────────────────────────────────────────────────────────
-def _plot_simple(history):
+def _plot_simple(history, save_dir):
     fig, ax = plt.subplots(figsize=(8, 5))
     fig.patch.set_facecolor("#F8FAFC")
 
@@ -83,11 +107,14 @@ def _plot_simple(history):
     _style_spines(ax)
 
     plt.tight_layout()
-    plt.show()
+    path = os.path.join(save_dir, "metric_MSE.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
 
 
 # ── One figure per metric ─────────────────────────────────────────
-def _plot_single_metric(history, key, epochs):
+def _plot_single_metric(history, key, epochs, save_dir):
     meta    = _METRIC_META[key]
     tr_vals = history[f"train_{key}"]
     te_vals = history[f"test_{key}"]
@@ -117,11 +144,14 @@ def _plot_single_metric(history, key, epochs):
     _style_spines(ax)
 
     plt.tight_layout()
-    plt.show()
+    path = os.path.join(save_dir, meta["filename"])
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
 
 
 # ── Summary table ─────────────────────────────────────────────────
-def _plot_summary_table(history):
+def _plot_summary_table(history, save_dir):
     metrics    = list(_METRIC_META.keys())
     col_labels = ["Metric", "Train (last)", "Test (last)", "Better when"]
     rows = []
@@ -162,7 +192,10 @@ def _plot_summary_table(history):
             )
 
     plt.tight_layout()
-    plt.show()
+    path = os.path.join(save_dir, "summary_table.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
 
 
 # ── Helpers ───────────────────────────────────────────────────────
