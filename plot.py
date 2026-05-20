@@ -1,172 +1,185 @@
+import math
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 
-
-# تنظیمات بصری ثابت
+# ── Visual constants ──────────────────────────────────────────────
 _COLORS = {
-    "train": "#2563EB",   # آبی
-    "test":  "#DC2626",   # قرمز
+    "train": "#2563EB",
+    "test":  "#DC2626",
 }
+
 _METRIC_META = {
-    "MSE":  {"label": "MSE",        "better": "↓ پایین‌تر بهتر",  "unit": ""},
-    "RMSE": {"label": "RMSE",       "better": "↓ پایین‌تر بهتر",  "unit": ""},
-    "MAE":  {"label": "MAE",        "better": "↓ پایین‌تر بهتر",  "unit": ""},
-    "R2":   {"label": "R²",         "better": "↑ به ۱ نزدیک‌تر", "unit": ""},
-    "MAPE": {"label": "MAPE (%)",   "better": "↓ پایین‌تر بهتر",  "unit": "%"},
+    "MSE":  {
+        "label":   "MSE — Mean Squared Error",
+        "y_label": "MSE",
+        "better":  "Lower is better",
+        "unit":    "",
+    },
+    "RMSE": {
+        "label":   "RMSE — Root Mean Squared Error",
+        "y_label": "RMSE",
+        "better":  "Lower is better",
+        "unit":    "",
+    },
+    "MAE":  {
+        "label":   "MAE — Mean Absolute Error",
+        "y_label": "MAE",
+        "better":  "Lower is better",
+        "unit":    "",
+    },
+    "R2":   {
+        "label":   "R² — Coefficient of Determination",
+        "y_label": "R²",
+        "better":  "Closer to 1 is better",
+        "unit":    "",
+    },
+    "MAPE": {
+        "label":   "MAPE — Mean Absolute Percentage Error",
+        "y_label": "MAPE (%)",
+        "better":  "Lower is better",
+        "unit":    "%",
+    },
 }
 
 
+# ── Public entry point ────────────────────────────────────────────
 def plot_history(history: dict):
     """
-    رسم کامل تاریخچه آموزش.
+    Plot training history.
 
-    اگر history فقط شامل loss_train / loss_test باشد (حالت قدیمی)،
-    فقط همان نمودار MSE رسم می‌شود.
-    اگر کلیدهای کامل وجود داشته باشند، داشبورد ۶ نمودار نمایش می‌دهد.
+    - Legacy format (only loss_train / loss_test): single MSE figure.
+    - Full format: one separate figure per metric + summary table.
     """
-    has_full = "train_RMSE" in history
-
-    if not has_full:
+    if "train_RMSE" not in history:
         _plot_simple(history)
-    else:
-        _plot_dashboard(history)
+        return
+
+    epochs = list(range(1, len(history["loss_train"]) + 1))
+    for key in _METRIC_META:
+        _plot_single_metric(history, key, epochs)
+
+    _plot_summary_table(history)
 
 
-# ──────────────────────────────────────────────────────────────────
-#  حالت قدیمی (فقط loss)
-# ──────────────────────────────────────────────────────────────────
+# ── Legacy ────────────────────────────────────────────────────────
 def _plot_simple(history):
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(history["loss_train"], label="Train Loss",
-            color=_COLORS["train"], linewidth=2)
-    ax.plot(history["loss_test"],  label="Test Loss",
-            color=_COLORS["test"],  linewidth=2)
-    ax.set_xlabel("Epoch", fontsize=12)
-    ax.set_ylabel("MSE Loss", fontsize=12)
-    ax.set_title("Training vs Testing Loss", fontsize=14, fontweight="bold")
-    ax.legend(fontsize=11)
-    ax.grid(True, linestyle="--", alpha=0.5)
+    fig.patch.set_facecolor("#F8FAFC")
+
+    epochs = list(range(1, len(history["loss_train"]) + 1))
+    ax.plot(epochs, history["loss_train"],
+            color=_COLORS["train"], linewidth=2.2,
+            marker="o", markersize=4, label="Train Loss")
+    ax.plot(epochs, history["loss_test"],
+            color=_COLORS["test"], linewidth=2.2,
+            marker="s", markersize=4, linestyle="--", label="Test Loss")
+
+    ax.set_title("Training vs Testing — MSE Loss",
+                 fontsize=14, fontweight="bold", color="#1E293B", pad=10)
+    ax.set_xlabel("Epoch", fontsize=11)
+    ax.set_ylabel("MSE", fontsize=11)
+    ax.legend(fontsize=10)
+    ax.grid(True, linestyle="--", alpha=0.45)
+    ax.set_facecolor("#FFFFFF")
+    _style_spines(ax)
+
     plt.tight_layout()
     plt.show()
 
 
-# ──────────────────────────────────────────────────────────────────
-#  داشبورد کامل (۵ معیار + خلاصه)
-# ──────────────────────────────────────────────────────────────────
-def _plot_dashboard(history):
-    metrics   = list(_METRIC_META.keys())          # MSE, RMSE, MAE, R2, MAPE
-    n_metrics = len(metrics)                        # 5
-    epochs    = list(range(1, len(history["loss_train"]) + 1))
+# ── One figure per metric ─────────────────────────────────────────
+def _plot_single_metric(history, key, epochs):
+    meta    = _METRIC_META[key]
+    tr_vals = history[f"train_{key}"]
+    te_vals = history[f"test_{key}"]
 
-    # چیدمان: ردیف اول ۳ نمودار، ردیف دوم ۲ نمودار + جدول خلاصه
-    fig = plt.figure(figsize=(16, 9))
+    fig, ax = plt.subplots(figsize=(8, 5))
     fig.patch.set_facecolor("#F8FAFC")
 
-    # عنوان اصلی
-    fig.suptitle(
-        "CT-HTTPS — نتایج ارزیابی مدل",
-        fontsize=17, fontweight="bold", color="#1E293B", y=0.98
+    ax.plot(epochs, tr_vals,
+            color=_COLORS["train"], linewidth=2.2,
+            marker="o", markersize=5, label="Train")
+    ax.plot(epochs, te_vals,
+            color=_COLORS["test"], linewidth=2.2,
+            marker="s", markersize=5, linestyle="--", label="Test")
+
+    _annotate_last(ax, epochs, tr_vals, _COLORS["train"], above=True,  unit=meta["unit"])
+    _annotate_last(ax, epochs, te_vals, _COLORS["test"],  above=False, unit=meta["unit"])
+
+    ax.set_title(
+        f"{meta['label']}\n{meta['better']}",
+        fontsize=13, fontweight="bold", color="#1E293B", pad=10
     )
+    ax.set_xlabel("Epoch", fontsize=11)
+    ax.set_ylabel(meta["y_label"], fontsize=11)
+    ax.legend(fontsize=10, framealpha=0.8)
+    ax.grid(True, linestyle="--", alpha=0.45)
+    ax.set_facecolor("#FFFFFF")
+    _style_spines(ax)
 
-    gs = gridspec.GridSpec(
-        2, 3,
-        figure=fig,
-        hspace=0.45,
-        wspace=0.35,
-        left=0.06, right=0.97,
-        top=0.91, bottom=0.08,
-    )
+    plt.tight_layout()
+    plt.show()
 
-    axes_positions = [
-        (0, 0), (0, 1), (0, 2),
-        (1, 0), (1, 1),
-    ]
 
-    for idx, key in enumerate(metrics):
-        row, col = axes_positions[idx]
-        ax = fig.add_subplot(gs[row, col])
-        meta = _METRIC_META[key]
-
-        tr_vals = history[f"train_{key}"]
-        te_vals = history[f"test_{key}"]
-
-        ax.plot(epochs, tr_vals,
-                color=_COLORS["train"], linewidth=2.2,
-                marker="o", markersize=4, label="Train")
-        ax.plot(epochs, te_vals,
-                color=_COLORS["test"],  linewidth=2.2,
-                marker="s", markersize=4, label="Test", linestyle="--")
-
-        # آخرین مقدار روی نمودار
-        ax.annotate(f"{tr_vals[-1]:.3f}",
-                    xy=(epochs[-1], tr_vals[-1]),
-                    xytext=(4, 4), textcoords="offset points",
-                    fontsize=8, color=_COLORS["train"])
-        ax.annotate(f"{te_vals[-1]:.3f}",
-                    xy=(epochs[-1], te_vals[-1]),
-                    xytext=(4, -10), textcoords="offset points",
-                    fontsize=8, color=_COLORS["test"])
-
-        ax.set_title(
-            f"{meta['label']}   {meta['better']}",
-            fontsize=10.5, fontweight="bold", color="#334155", pad=6
-        )
-        ax.set_xlabel("Epoch", fontsize=9, color="#475569")
-        ax.set_ylabel(meta["label"] + (f" ({meta['unit']})" if meta["unit"] else ""),
-                      fontsize=9, color="#475569")
-        ax.legend(fontsize=8, framealpha=0.7)
-        ax.grid(True, linestyle="--", alpha=0.4)
-        ax.set_facecolor("#FFFFFF")
-        for spine in ax.spines.values():
-            spine.set_edgecolor("#CBD5E1")
-
-    # ── جدول خلاصه آخرین epoch ──────────────────────────────────
-    ax_table = fig.add_subplot(gs[1, 2])
-    ax_table.axis("off")
-
-    col_labels = ["Metric", "Train", "Test", "Better"]
-    table_data = []
+# ── Summary table ─────────────────────────────────────────────────
+def _plot_summary_table(history):
+    metrics    = list(_METRIC_META.keys())
+    col_labels = ["Metric", "Train (last)", "Test (last)", "Better when"]
+    rows = []
     for key in metrics:
-        meta   = _METRIC_META[key]
-        tr_v   = history[f"train_{key}"][-1]
-        te_v   = history[f"test_{key}"][-1]
-        tr_str = f"{tr_v:.4f}" + (meta["unit"] if meta["unit"] else "")
-        te_str = f"{te_v:.4f}" + (meta["unit"] if meta["unit"] else "")
-        table_data.append([meta["label"], tr_str, te_str, meta["better"]])
+        meta = _METRIC_META[key]
+        tr_v = history[f"train_{key}"][-1]
+        te_v = history[f"test_{key}"][-1]
+        unit = meta["unit"]
 
-    tbl = ax_table.table(
-        cellText=col_labels,
-        cellLoc="center",
-        loc="upper center",
-    )
+        def _fmt(v, u=unit):
+            return "N/A" if math.isnan(v) else f"{v:.4f}{u}"
 
-    # رسم دستی جدول با زیبایی بیشتر
-    tbl = ax_table.table(
-        cellText=table_data,
-        colLabels=col_labels,
-        cellLoc="center",
-        loc="center",
-    )
+        rows.append([meta["y_label"], _fmt(tr_v), _fmt(te_v), meta["better"]])
+
+    fig, ax = plt.subplots(figsize=(9, 3.2))
+    fig.patch.set_facecolor("#F8FAFC")
+    ax.axis("off")
+
+    fig.suptitle("CT-HTTPS — Final Epoch Summary",
+                 fontsize=14, fontweight="bold", color="#1E293B", y=0.97)
+
+    tbl = ax.table(cellText=rows, colLabels=col_labels,
+                   cellLoc="center", loc="center")
     tbl.auto_set_font_size(False)
-    tbl.set_fontsize(9)
-    tbl.scale(1.1, 1.55)
+    tbl.set_fontsize(10)
+    tbl.scale(1.15, 1.7)
 
-    # رنگ‌بندی هدر
     for col_idx in range(len(col_labels)):
-        tbl[(0, col_idx)].set_facecolor("#1E40AF")
-        tbl[(0, col_idx)].set_text_props(color="white", fontweight="bold")
+        cell = tbl[(0, col_idx)]
+        cell.set_facecolor("#1E40AF")
+        cell.set_text_props(color="white", fontweight="bold")
 
-    # رنگ زیبا برای ردیف‌های داده
     row_colors = ["#EFF6FF", "#DBEAFE"]
-    for row_idx in range(1, len(metrics) + 1):
+    for row_idx in range(1, len(rows) + 1):
         for col_idx in range(len(col_labels)):
             tbl[(row_idx, col_idx)].set_facecolor(
                 row_colors[(row_idx - 1) % 2]
             )
 
-    ax_table.set_title(
-        f"خلاصه — Epoch آخر",
-        fontsize=10.5, fontweight="bold", color="#334155", pad=8
+    plt.tight_layout()
+    plt.show()
+
+
+# ── Helpers ───────────────────────────────────────────────────────
+def _annotate_last(ax, epochs, vals, color, above, unit):
+    last_val = vals[-1]
+    if math.isnan(last_val):
+        return
+    offset = (4, 6) if above else (4, -12)
+    ax.annotate(
+        f"{last_val:.3f}{unit}",
+        xy=(epochs[-1], last_val),
+        xytext=offset,
+        textcoords="offset points",
+        fontsize=8.5, color=color, fontweight="bold",
     )
 
-    plt.show()
+
+def _style_spines(ax):
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#CBD5E1")
