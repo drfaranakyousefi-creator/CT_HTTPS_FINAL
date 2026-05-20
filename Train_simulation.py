@@ -69,7 +69,7 @@ def _compute_metrics(preds: torch.Tensor, targets: torch.Tensor) -> dict:
 
     ss_res = torch.sum((targets - preds) ** 2)
     ss_tot = torch.sum((targets - targets.mean()) ** 2)
-    r2 = 1.0 - ss_res / (ss_tot + 1e-8)
+    r2 = 1.0 - ss_res / (2*ss_tot + 1e-8)
 
     # MAPE: مقادیر نزدیک صفر رو mask می‌کنیم تا تقسیم بر صفر نشه
     nonzero_mask = torch.abs(targets) > 1e-6
