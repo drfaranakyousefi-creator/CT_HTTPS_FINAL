@@ -1,10 +1,36 @@
 import pandas as pd
 import torch
 import torch.nn as nn
+import math
 
 from client_net import client_network
 from new_dataset import data_preparing
 from server_net import prediction_net
+
+
+# ══════════════════════════════════════════════════════════════════
+#  راهنمای تفسیر معیارهای ارزیابی
+# ══════════════════════════════════════════════════════════════════
+METRICS_GUIDE = """
+╔══════════════════════════════════════════════════════════════════╗
+║              راهنمای تفسیر معیارهای ارزیابی                    ║
+╠══════════════════════════════════════════════════════════════════╣
+║  MSE   (Mean Squared Error)        → هر چقدر پایین‌تر، بهتر    ║
+║        خطاهای بزرگ را بیشتر جریمه می‌کند                       ║
+║                                                                  ║
+║  RMSE  (Root Mean Squared Error)   → هر چقدر پایین‌تر، بهتر    ║
+║        همان MSE ولی هم‌واحد با مقدار اصلی (مثلاً %)            ║
+║                                                                  ║
+║  MAE   (Mean Absolute Error)       → هر چقدر پایین‌تر، بهتر    ║
+║        به outlier مقاوم‌تر — برای داده‌های ICU مناسب           ║
+║                                                                  ║
+║  R²    (Coefficient of Determination) → هر چقدر به ۱ نزدیک‌تر ║
+║        مثبت: مدل بهتر از میانگین    منفی: مدل ضعیف است         ║
+║                                                                  ║
+║  MAPE  (Mean Absolute Percentage Error) → هر چقدر پایین‌تر     ║
+║        خطا به درصد — برای مقایسه بین target های مختلف          ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
 
 
 def lr_at_epoch(epoch_1based, lr_spec):
@@ -27,6 +53,41 @@ def _parse_CT_HTTPS_positional(args, chartevents_kw):
     chartevents_path = chartevents_kw if chartevents_kw else "./CHARTEVENTS.csv"
     return (chartevents_path, args[0], args[1], args[2],
             args[3] if len(args) >= 4 else None)
+
+
+def _compute_metrics(preds: torch.Tensor, targets: torch.Tensor) -> dict:
+    """
+    محاسبه همه معیارهای ارزیابی روی یک batch یا کل داده.
+    preds, targets: هر دو 1D tensor روی CPU.
+    """
+    preds   = preds.float()
+    targets = targets.float()
+
+    mse  = torch.mean((preds - targets) ** 2)
+    rmse = torch.sqrt(mse)
+    mae  = torch.mean(torch.abs(preds - targets))
+
+    ss_res = torch.sum((targets - preds) ** 2)
+    ss_tot = torch.sum((targets - targets.mean()) ** 2)
+    r2 = 1.0 - ss_res / (ss_tot + 1e-8)
+
+    # MAPE: مقادیر نزدیک صفر رو mask می‌کنیم تا تقسیم بر صفر نشه
+    nonzero_mask = torch.abs(targets) > 1e-6
+    if nonzero_mask.sum() > 0:
+        mape = torch.mean(
+            torch.abs((targets[nonzero_mask] - preds[nonzero_mask])
+                      / targets[nonzero_mask])
+        ) * 100.0
+    else:
+        mape = torch.tensor(float('nan'))
+
+    return {
+        "MSE":  mse.item(),
+        "RMSE": rmse.item(),
+        "MAE":  mae.item(),
+        "R2":   r2.item(),
+        "MAPE": mape.item(),
+    }
 
 
 class CT_HTTPS(nn.Module):
@@ -89,8 +150,6 @@ class CT_HTTPS(nn.Module):
             lr=initial_client_lr,
         ).to(self.device)
 
-        # FIX اصلی: بُعد CLS که client میده d_model * n_features هست
-        # چون در client_network هر feature یه latent d_model داره و کنار هم concat میشن
         d_model_server = d_model * n_features
 
         # ساخت server (prediction) network
@@ -128,23 +187,75 @@ class CT_HTTPS(nn.Module):
         for g in self.optimizer.param_groups:
             g["lr"] = lr
 
+    # ──────────────────────────────────────────────────────────────
+    #  fit
+    # ──────────────────────────────────────────────────────────────
     def fit(self, epochs):
-        history = {"loss_train": [], "loss_test": []}
+        # نمایش راهنمای معیارها فقط یک بار در ابتدا
+        print(METRICS_GUIDE)
+
+        history = {
+            "loss_train": [],
+            "loss_test":  [],
+            # train
+            "train_MSE":  [], "train_RMSE": [], "train_MAE":  [],
+            "train_R2":   [], "train_MAPE": [],
+            # test
+            "test_MSE":   [], "test_RMSE":  [], "test_MAE":   [],
+            "test_R2":    [], "test_MAPE":  [],
+        }
+
         for ep in range(epochs):
             lr_now = lr_at_epoch(ep + 1, self._lr_spec_client)
             self._apply_learning_rate(lr_now)
             self.train_one_epoch()
-            tr, te = self.evaluate_one_epoch()
-            print(f"epoch {ep+1}/{epochs}  train={tr:.4f}  test={te:.4f}")
-            history["loss_train"].append(tr.item())
-            history["loss_test"].append(te.item())
+
+            tr_metrics = self.evaluate_one_epoch(split="train")
+            te_metrics = self.evaluate_one_epoch(split="test")
+
+            # ذخیره در history
+            history["loss_train"].append(tr_metrics["MSE"])
+            history["loss_test"].append(te_metrics["MSE"])
+            for key in ("MSE", "RMSE", "MAE", "R2", "MAPE"):
+                history[f"train_{key}"].append(tr_metrics[key])
+                history[f"test_{key}"].append(te_metrics[key])
+
+            # چاپ خوانا
+            self._print_epoch(ep + 1, epochs, tr_metrics, te_metrics)
+
         return history
 
+    @staticmethod
+    def _print_epoch(ep, total_ep, tr, te):
+        sep = "─" * 62
+        print(f"\n┌{sep}┐")
+        print(f"│  Epoch {ep:>3}/{total_ep:<3}{'':>46}│")
+        print(f"├{'─'*20}┬{'─'*19}┬{'─'*20}┤")
+        print(f"│{'  Metric':^20}│{'  Train':^19}│{'  Test':^20}│")
+        print(f"├{'─'*20}┼{'─'*19}┼{'─'*20}┤")
+        for name in ("MSE", "RMSE", "MAE", "R2", "MAPE"):
+            unit = "%" if name == "MAPE" else ("" if name == "R2" else "")
+            tr_v = tr[name]
+            te_v = te[name]
+            if math.isnan(tr_v) or math.isnan(te_v):
+                tr_str = "   N/A"
+                te_str = "   N/A"
+            else:
+                tr_str = f"{tr_v:>12.4f}{unit}"
+                te_str = f"{te_v:>12.4f}{unit}"
+            print(f"│  {name:<18}│{tr_str:>19}│{te_str:>20}│")
+        print(f"└{'─'*20}┴{'─'*19}┴{'─'*20}┘")
+
+    # ──────────────────────────────────────────────────────────────
+    #  train
+    # ──────────────────────────────────────────────────────────────
     def train_one_epoch(self):
         self.network.train()
         self.prediction.train()
         for x, y, pad_mask in self.data.train_loader:
-            x, y, pad_mask = x.to(self.device), y.to(self.device), pad_mask.to(self.device)
+            x, y, pad_mask = (x.to(self.device),
+                               y.to(self.device),
+                               pad_mask.to(self.device))
             self.optimizer.zero_grad()
             cls_out   = self.network(x, pad_mask)
             pred      = self.prediction.forward_direct(cls_out)
@@ -153,35 +264,43 @@ class CT_HTTPS(nn.Module):
             (task_loss + ae_loss).backward()
             self.optimizer.step()
 
-    def evaluate_one_epoch(self):
+    # ──────────────────────────────────────────────────────────────
+    #  evaluate
+    # ──────────────────────────────────────────────────────────────
+    def evaluate_one_epoch(self, split: str = "test") -> dict:
+        """
+        split: 'train' یا 'test'
+        برمیگردونه: dict با کلیدهای MSE, RMSE, MAE, R2, MAPE
+        """
+        loader = (self.data.train_loader
+                  if split == "train"
+                  else self.data.test_loader)
         self.network.eval()
         self.prediction.eval()
         with torch.no_grad():
-            tr = self._eval_loader(self.data.train_loader)
-            te = self._eval_loader(self.data.test_loader)
-        return tr, te
+            return self._eval_loader(loader)
 
-    def _eval_loader(self, loader):
-        preds, labels = [], []
+    def _eval_loader(self, loader) -> dict:
+        all_preds   = []
+        all_targets = []
+
         for x, y, pad_mask in loader:
-            x, y, pad_mask = x.to(self.device), y.to(self.device), pad_mask.to(self.device)
-            with torch.no_grad():
-                cls_out = self.network(x, pad_mask)
-                pred    = self.prediction.forward_direct(cls_out)
-            preds.append(pred.cpu())
-            labels.append(y.cpu())
-        
-        preds  = torch.cat(preds)
-        labels = torch.cat(labels)
-        
-        mse  = ((preds - labels)**2).mean()
-        mae  = (preds - labels).abs().mean()
-        rmse = mse.sqrt()
-        ss_res = ((labels - preds)**2).sum()
-        ss_tot = ((labels - labels.mean())**2).sum()
-        r2   = 1 - ss_res / ss_tot
-        
-        return {"MSE": mse.item(), "MAE": mae.item(), "RMSE": rmse.item(), "R²": r2.item()}
+            x, y, pad_mask = (x.to(self.device),
+                               y.to(self.device),
+                               pad_mask.to(self.device))
+            cls_out = self.network(x, pad_mask)
+            pred    = self.prediction.forward_direct(cls_out)
+            all_preds.append(pred.cpu())
+            all_targets.append(y.cpu())
+
+        all_preds   = torch.cat(all_preds,   dim=0)
+        all_targets = torch.cat(all_targets, dim=0)
+
+        return _compute_metrics(all_preds, all_targets)
+
+    # ──────────────────────────────────────────────────────────────
+    #  knowledge transfer (بدون تغییر)
+    # ──────────────────────────────────────────────────────────────
     def get_knowledge(self, CT_object):
         source_aes = CT_object.network.feature_aes
         n_shared   = min(self.network.n_features, len(source_aes))
