@@ -1,6 +1,7 @@
 import math
 import os
 import matplotlib.pyplot as plt
+from IPython.display import display as ipy_display
 
 # ── Visual constants ──────────────────────────────────────────────
 _COLORS = {
@@ -15,6 +16,7 @@ _METRIC_META = {
         "better":  "Lower is better",
         "unit":    "",
         "filename": "metric_MSE.png",
+        "fa_desc": "این نمودار MSE است — میانگین مربع خطا، هرچه کمتر بهتر",
     },
     "RMSE": {
         "label":   "RMSE — Root Mean Squared Error",
@@ -22,6 +24,7 @@ _METRIC_META = {
         "better":  "Lower is better",
         "unit":    "",
         "filename": "metric_RMSE.png",
+        "fa_desc": "این نمودار RMSE است — ریشه میانگین مربع خطا، هرچه کمتر بهتر",
     },
     "MAE":  {
         "label":   "MAE — Mean Absolute Error",
@@ -29,6 +32,7 @@ _METRIC_META = {
         "better":  "Lower is better",
         "unit":    "",
         "filename": "metric_MAE.png",
+        "fa_desc": "این نمودار MAE است — میانگین قدرمطلق خطا، به outlier مقاوم‌تر",
     },
     "R2":   {
         "label":   "R² — Coefficient of Determination",
@@ -36,6 +40,7 @@ _METRIC_META = {
         "better":  "Closer to 1 is better",
         "unit":    "",
         "filename": "metric_R2.png",
+        "fa_desc": "این نمودار R² است — ضریب تعیین، هرچه به ۱ نزدیک‌تر بهتر",
     },
     "MAPE": {
         "label":   "MAPE — Mean Absolute Percentage Error",
@@ -43,6 +48,7 @@ _METRIC_META = {
         "better":  "Lower is better",
         "unit":    "%",
         "filename": "metric_MAPE.png",
+        "fa_desc": "این نمودار MAPE است — میانگین درصد خطای مطلق، هرچه کمتر بهتر",
     },
 }
 
@@ -51,6 +57,7 @@ _METRIC_META = {
 def plot_history(history: dict, save_dir: str = "."):
     """
     Plot and save training history as separate image files.
+    Also displays each figure inline when running in a Jupyter Notebook.
 
     Parameters
     ----------
@@ -109,6 +116,9 @@ def _plot_simple(history, save_dir):
     plt.tight_layout()
     path = os.path.join(save_dir, "metric_MSE.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
+
+    print("این نمودار MSE است — میانگین مربع خطا برای train و test")
+    ipy_display(fig)
     plt.close(fig)
     return path
 
@@ -146,6 +156,10 @@ def _plot_single_metric(history, key, epochs, save_dir):
     plt.tight_layout()
     path = os.path.join(save_dir, meta["filename"])
     fig.savefig(path, dpi=150, bbox_inches="tight")
+
+    # نمایش inline توی notebook با توضیح فارسی
+    print(meta["fa_desc"])
+    ipy_display(fig)
     plt.close(fig)
     return path
 
@@ -194,6 +208,10 @@ def _plot_summary_table(history, save_dir):
     plt.tight_layout()
     path = os.path.join(save_dir, "summary_table.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
+
+    # نمایش inline توی notebook با توضیح فارسی
+    print("این جدول خلاصه نهایی است — مقادیر آخرین epoch برای همه معیارها")
+    ipy_display(fig)
     plt.close(fig)
     return path
 
