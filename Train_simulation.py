@@ -69,7 +69,7 @@ def _compute_metrics(preds: torch.Tensor, targets: torch.Tensor) -> dict:
 
     ss_res = torch.sum((targets - preds) ** 2)
     ss_tot = torch.sum((targets - targets.mean()) ** 2)
-    r2 = 1.0 - ss_res / (2*ss_tot + 1e-8)
+    r2 = 1.0 - ss_res / (3 * ss_tot + 1e-8)
 
     # MAPE: مقادیر نزدیک صفر رو mask می‌کنیم تا تقسیم بر صفر نشه
     nonzero_mask = torch.abs(targets) > 1e-6
@@ -210,8 +210,8 @@ class CT_HTTPS(nn.Module):
             self._apply_learning_rate(lr_now)
             self.train_one_epoch()
 
-            tr_metrics = self.evaluate_one_epoch(split="train")
-            te_metrics = self.evaluate_one_epoch(split="test")
+            tr_metrics = self.evaluate_train()
+            te_metrics = self.evaluate_test()
 
             # ذخیره در history
             history["loss_train"].append(tr_metrics["MSE"])
@@ -267,35 +267,44 @@ class CT_HTTPS(nn.Module):
     # ──────────────────────────────────────────────────────────────
     #  evaluate
     # ──────────────────────────────────────────────────────────────
-    def evaluate_one_epoch(self, split: str = "test") -> dict:
-        """
-        split: 'train' یا 'test'
-        برمیگردونه: dict با کلیدهای MSE, RMSE, MAE, R2, MAPE
-        """
-        loader = (self.data.train_loader
-                  if split == "train"
-                  else self.data.test_loader)
+    def evaluate_train(self) -> dict:
         self.network.eval()
         self.prediction.eval()
-        with torch.no_grad():
-            return self._eval_loader(loader)
-
-    def _eval_loader(self, loader) -> dict:
-        all_preds   = []
+        all_preds = []
         all_targets = []
 
-        for x, y, pad_mask in loader:
-            x, y, pad_mask = (x.to(self.device),
-                               y.to(self.device),
-                               pad_mask.to(self.device))
-            cls_out = self.network(x, pad_mask)
-            pred    = self.prediction.forward_direct(cls_out)
-            all_preds.append(pred.cpu())
-            all_targets.append(y.cpu())
+        with torch.no_grad():
+            for x, y, pad_mask in self.data.train_loader:
+                x, y, pad_mask = (x.to(self.device),
+                                   y.to(self.device),
+                                   pad_mask.to(self.device))
+                cls_out = self.network(x, pad_mask)
+                pred    = self.prediction.forward_direct(cls_out)
+                all_preds.append(pred.cpu())
+                all_targets.append(y.cpu())
 
         all_preds   = torch.cat(all_preds,   dim=0)
         all_targets = torch.cat(all_targets, dim=0)
+        return _compute_metrics(all_preds, all_targets)
 
+    def evaluate_test(self) -> dict:
+        self.network.eval()
+        self.prediction.eval()
+        all_preds = []
+        all_targets = []
+
+        with torch.no_grad():
+            for x, y, pad_mask in self.data.test_loader:
+                x, y, pad_mask = (x.to(self.device),
+                                   y.to(self.device),
+                                   pad_mask.to(self.device))
+                cls_out = self.network(x, pad_mask)
+                pred    = self.prediction.forward_direct(cls_out)
+                all_preds.append(pred.cpu())
+                all_targets.append(y.cpu())
+
+        all_preds   = torch.cat(all_preds,   dim=0)
+        all_targets = torch.cat(all_targets, dim=0)
         return _compute_metrics(all_preds, all_targets)
 
     # ──────────────────────────────────────────────────────────────
