@@ -172,7 +172,7 @@ class CT_HTTPS(nn.Module):
                 history[f"train_{key}"].append(tr_metrics[key])
                 history[f"test_{key}"].append(te_metrics[key])
 
-            self._print_epoch(ep + 1, epochs, tr_metrics, te_metrics)
+            #self._print_epoch(ep + 1, epochs, tr_metrics, te_metrics)
 
         return history
 
